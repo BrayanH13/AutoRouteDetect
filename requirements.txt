@@ -1,0 +1,10 @@
+This Python program extracts VRF (Virtual Routing and Forwarding) configurations and their details from Cisco network devices.networks and devices. 
+
+Note: Basic knowledge of Cisco networks and devices is essential to understand and use this tool effectively.
+You must to dowloaded the next libraries:
+
+*netmiko: For SSH communication with Cisco devices
+*pandas: For organizing and filtering routing data
+*requests: For handling HTTP requests (if applicable)
+
+
