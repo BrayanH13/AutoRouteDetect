@@ -1,0 +1,314 @@
+    # ---------------------------------------------------------------
+# Cisco VRF Route Reader
+# Developed by: Brayan David Herrera Diaz
+# Title: Electronics Engineer
+# Contact: herreradiaz13@gmail.com
+# Description: This script extracts VRF configurations from Cisco devices,
+#              including VRF name, IP gateway, and route counts for OSPF, BGP, and RIP.
+# ---------------------------------------------------------------
+ 
+# ---------------------------------------------------------------
+#AGREGARLE MULTIPROCESSING PARA CADA ROUTER DE COLOMBIA
+# ---------------------------------------------------------------
+from netmiko import ConnectHandler
+import pandas as pd
+import re
+from collections import defaultdict
+import requests
+import json
+import time
+import threading
+ 
+#Curacavi
+rtcur01="10.255.242.147"
+rtcur02="172.25.5.5"
+#Ascenty
+rtinet01="10.255.242.1"
+rtinet02="172.24.4.195"
+#Equinix
+dist01="172.25.5.4"
+dist02="172.25.5.5"
+#credenciales
+user="brayan.herrera.apr"
+password="Hispan0c2025***"
+user_col="brayan.herrera"
+password_col="Ice2307#"
+secret="c0r3Q1ip"
+ 
+#VRF Chile
+ch_vrf=["PROJECT_801"
+     ,"PROJECT_802"
+     ,"PROJECT_803"
+]
+#VRF Colombia
+col_vrf=["VLAN806"
+     ,"VLAN807"
+     ,"VLAN808"
+]
+headers = {"Content-Type": "application/json"}
+    # Lista de dispositivos Cisco
+equipos = {
+    "rtcur01": {
+        "IP":rtcur01,
+        "user":user,
+        "password":password,
+        "vrf":ch_vrf,
+        "pattern_hub_sn2": [
+            r'^O\s+10\.1\.56\.2/32',
+        ],
+        "pattern_sat_sn2": [
+            r'O N2[^\n]*\n\s*\[.*\] via 10\.68\.\d+\.2',
+            r'B[^\n]*\n\s*\[.*\] via 10\.68\.\d+\.2'
+        ],
+        "pattern_hub_sn4": [
+            r'^O\s+10\.1\.56\.4/32'
+        ],
+        "pattern_sat_sn4": [
+            r'O N2[^\n]*\n\s*\[.*\] via 10\.68\.\d+\.4',
+            r'B[^\n]*\n\s*\[.*\] via 10\.68\.\d+\.4'
+ 
+        ],
+        "urls": [
+            "http://172.20.1.161:5050/B252785F-53D5-46BA-9936-1EFE8A5B494B?value=0",
+        ]
+    },
+    "rtchile01": {
+        "IP":rtinet01,
+        "user":user,
+        "password":password,
+        "vrf": ch_vrf,
+        "pattern_hub_sn2": [
+            r'^B\s+10\.1\.56\.2/32',
+        ],
+        "pattern_sat_sn2": [
+            r'^B\s+10\.234.*via\s+10\.53\.10\.3',
+            r'^B\s+10\.234.*via\s+10\.53\.10\.3'
+        ],
+        "pattern_hub_sn4": [
+            r'^B\s+10\.1\.56\.4/32'
+        ],
+        "pattern_sat_sn4": [
+            r'^B\s+10\.234.*via\s+10\.53\.10\.3',
+            r'^B\s+10\.234.*via\s+10\.53\.10\.3'
+        ],
+        "urls": ["http://172.20.1.161:5051/1ABE676A-EF4B-4D5F-86D0-663284906862?value=0"]
+    },
+    "dist01": {
+        "IP":dist01,
+        "user":user_col,
+        "password":password_col,
+        "vrf": col_vrf,
+        "pattern_hub_sn2": [
+            r'^B\s+10\.1\.56\.2/32'
+        ],
+        "pattern_sat_sn2": [
+            r'^B\s+10\.234.*via\s+10\.181\.0\.1',
+             r'^B\s+10\.234.*via\s+10\.181\.1\.5',          
+            r'^B\s+10\.234.*via\s+10\.181\.0\.9'
+        ],
+        "pattern_hub_sn4": [
+            r'^B\s+10\.1\.56\.4/32'
+        ],
+        "pattern_sat_sn4": [
+            r'^B\s+10\.234.*via\s+10\.181\.0\.1',
+             r'^B\s+10\.234.*via\s+10\.181\.1\.5',          
+            r'^B\s+10\.234.*via\s+10\.181\.0\.9'
+        ],
+        "urls": ["http://172.20.1.161:5052/731FD337-6031-4173-8ED6-CC87A433E0C1?value=0"]
+    }
+}
+ 
+ 
+def conect(host,user,password,secret):
+        # Datos del equipo
+        cisco_device = {
+        'device_type': 'cisco_ios',
+        'host': host,
+        'username': user,
+        'password': password,
+        'secret': secret,
+        }
+ 
+        # Conexión
+        net_connect = ConnectHandler(**cisco_device)
+        net_connect.enable()
+        return net_connect
+ 
+#FUNCIONES DE ANALISIS
+ 
+def gateway_ip(text, vrf_name):
+        # Captura el bloque que sigue a "Routing Table: {vrf_name}"
+        pattern = re.finditer(rf'Routing Table: {(vrf_name)}\n(?:.*\n)*?Gateway of last resort is (\d+\.\d+\.\d+\.\d+) to',text)
+        for match in pattern:
+            gateway = match.group(1).strip()
+        # Agrega solo el ID, no el diccionario completo
+        if not match:
+            return {
+                "vrf": vrf_name,
+                "gateway": "No encontrado",
+                "total_routes": 0,
+                "bgp_count": 0,
+                "bgp_routes": []
+            }
+ 
+ 
+        return {
+            "vrf": vrf_name,
+            "gateway": gateway,
+            #"total_routes": total_routes,
+            #"bgp_count": bgp_count,
+            #"bgp_routes": bgp_routes
+        }
+ 
+def to_prtg(url_prtg,HUB_SN2_RUTAS,HUB_SN4_RUTAS,SAT_SN2_RUTAS,SAT_SN4_RUTAS):    
+        # Construir payload con canales separados
+        payload_prtg = {
+            "prtg": {
+            "result": [
+            {
+                "channel": "HUB_SN2_RUTAS",
+                "value": HUB_SN2_RUTAS,
+                "unit": "Rutas"
+            },
+            {
+                "channel": "HUB_SN4_RUTAS",
+                "value": HUB_SN4_RUTAS,
+                "unit": "Rutas"
+            },
+            {
+                "channel": "SAT_SN2_RUTAS",
+                "value": SAT_SN2_RUTAS,
+                "unit": "Rutas"
+            }
+            ,
+            {
+                "channel": "SAT_SN4_RUTAS",
+                "value": SAT_SN4_RUTAS,
+                "unit": "Rutas"
+            }
+                        ]
+                    }
+                }
+        try:
+            requests.post(
+                    url_prtg,
+                    headers=headers,
+                    data=json.dumps(payload_prtg),
+                    timeout=10
+                    )
+        except requests.exceptions.RequestException as e:
+            print(f"❌ Error al enviar datos a PRTG: {e}")
+ 
+#SE BORRO EL URL PARA PRUEBAS ACORDARSE AGREGARLO
+def procesar_equipo(equipo,user,password,vrf_list,pattern_hub_sn2,pattern_hub_sn4,pattern_sat_sn2,pattern_sat_sn4,urls):
+    try:
+        net_connect = conect(equipo,user,password,secret)
+        text = ""
+        for vrf in vrf_list:
+            try:
+                route_output = net_connect.send_command(f"show ip route vrf {vrf}")
+                text += f"\nRutas de VRF {vrf}\n{route_output}\n"
+            except:
+                print(f"{equipo}: LA VRF NO ESTA CONFIGURADA{vrf}")
+            O_hub_sn2_total = 0
+            O_hub_sn4_total = 0
+            O_sat_sn2_total = 0
+            O_sat_sn4_total = 0
+            try:
+                routes = gateway_ip(text, vrf)
+                gateway = routes.get("gateway", "No encontrado")
+                print(f"Gateway: {gateway}")
+            except:
+                print("FALLO EN EL GATEWAY")
+                continue
+           
+            if gateway == "No encontrado" or not gateway:
+                print(f"⚠️ Sin gateway para VRF '{vrf}' en {equipo}")
+                continue
+ 
+            try:
+                print(f"🔍 Entrando a total_rutas para VRF: {vrf} con gateway: {gateway}")
+ 
+                # Buscar el bloque de rutas que sigue al gateway
+                pattern = re.finditer(
+                    rf'Routing Table: {(vrf)}\n.*?Gateway of last resort is {(gateway)} to.*?\n(.*?)(?=\nRouting Table:|\Z)',
+                    text,
+                    re.DOTALL
+                )
+                for match in pattern:
+                    rutas_bloque = match.group(1).strip()
+                    print(f"📦 Rutas encontradas para {vrf}:\n{rutas_bloque}")
+                    osat_sn2 = len(re.findall(pattern_sat_sn2[0], rutas_bloque, re.MULTILINE))
+                    osat_sn4 = len(re.findall(pattern_sat_sn4[0], rutas_bloque, re.MULTILINE))
+                    o_hub_s2 = len(re.findall(pattern_hub_sn2[0], rutas_bloque, re.MULTILINE))
+                    o_hub_s4 = len(re.findall(pattern_hub_sn4[0], rutas_bloque, re.MULTILINE))
+                    if osat_sn2 ==0:
+                        osat_sn2 = len(re.findall(pattern_sat_sn2[1], rutas_bloque, re.MULTILINE))
+                    if osat_sn4 ==0:
+                        osat_sn4 = len(re.findall(pattern_sat_sn4[1], rutas_bloque, re.MULTILINE))
+                    if osat_sn2 ==0:
+                        osat_sn2 = len(re.findall(pattern_sat_sn2[2], rutas_bloque, re.MULTILINE))
+                    if osat_sn4 ==0:
+                        osat_sn4 = len(re.findall(pattern_sat_sn4[2], rutas_bloque, re.MULTILINE))
+                # Si no se encontró ningún bloque
+                O_hub_sn2_total += o_hub_s2
+                O_hub_sn4_total += o_hub_s4
+                O_sat_sn2_total += osat_sn2
+                O_sat_sn4_total += osat_sn4
+                print(f"\n📊 Totales en {equipo} y la VRF{vrf}: OSPF HUB SN2 = {O_hub_sn2_total}, OSPF HUB SN4 = {O_hub_sn4_total},OSPF SAT SN2 = {O_sat_sn2_total}, OSPF SAT SN4 = {O_sat_sn4_total}")
+            except Exception as e:
+                print(f"Fallo la obtención de rutas: {e}")
+            try:
+                to_prtg(urls[0],O_hub_sn2_total,O_hub_sn4_total,O_sat_sn2_total,O_sat_sn4_total)
+            except Exception as e:
+                print(f"fallo al enviar datos : {e}")
+        net_connect.disconnect()
+ 
+    except Exception as e:
+        print(f"❌ Error en {equipo}: {e}")
+while True:
+    try:
+        hilos = []
+        for nombre_equipo, datos in equipos.items():
+            hilo = threading.Thread(
+                target=procesar_equipo,
+                args=(
+                    datos["IP"],
+                    datos["user"],
+                    datos["password"],
+                    datos["vrf"],
+                    datos["pattern_hub_sn2"],
+                    datos["pattern_hub_sn4"],
+                    datos["pattern_sat_sn2"],
+                    datos["pattern_sat_sn4"],
+                    datos["urls"]
+                )
+            )
+            hilos.append(hilo)
+            hilo.start()
+ 
+        # Esperar a que todos los hilos terminen
+        for hilo in hilos:
+            hilo.join()
+        time.sleep(30)
+    except Exception as e:
+        print("Fallo")
+ 
+'''
+REVISAR ESTE CODIGO CUANDO TERMINE DE COMPLEMENTAR LO DE ARRIBA
+while True:
+    try:
+        hilos = []
+        for IP, datos in equipos.items():
+            hilo = threading.Thread(
+                target=procesar_equipo,
+                args=(IP, user, password, datos["vrf"])
+            )
+            hilos.append(hilo)
+            hilo.start()
+ 
+        for hilo in hilos:
+            hilo.join()  # opcional: espera a que todos los hilos terminen
+ 
+    except Exception as e:
+        print(f"Error en el ciclo principal: {e}")'''
