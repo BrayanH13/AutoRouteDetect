@@ -1,0 +1,25 @@
+
+'''    "lur_rtcore01": {
+        "IP":lur_rtcore01_ip,
+        "user":user,
+        "password":password,
+        "vrf": lur_rtcore_vrf,
+        "patterns": [
+            r'^R\s+10\.234.*via\s+10\.65\.83\.2',
+            r'^R\s+10\.234.*via\s+10\.65\.81\.2',
+            r'^R\s+10\.234.*via\s+10\.65\.82\.2',
+        ],
+        "urls": ["http://172.20.1.161:5050/AAD9C9E0-27F0-47A1-BDF7-69EADD4BAC73?value=0"]
+    },
+    "lur_rtcore02": {
+        "IP":lur_rtcore02_ip,
+        "user":user,
+        "password":password,
+        "vrf": lur_rtcore_vrf,
+        "patterns": [
+            r'^R\s+10\.234.*via\s+10\.65\.83\.2',
+            r'^R\s+10\.234.*via\s+10\.65\.81\.2',
+            r'^R\s+10\.234.*via\s+10\.65\.82\.2',
+        ],
+        "urls": ["http://172.20.1.161:5051/64185E0E-EAF7-4166-9574-B3975D5715E9?value=0"]
+    },'''
